@@ -9,7 +9,12 @@
       "Bash(pde history:*)",
       "Bash(mv /Users/cboyfly/pde/.env \"/Users/cboyfly/Documents/personal assistant/.env\")",
       "Bash(mv /Users/cboyfly/pde/.gitignore \"/Users/cboyfly/Documents/personal assistant/.gitignore\")",
-      "Bash(rmdir /Users/cboyfly/pde)"
+      "Bash(rmdir /Users/cboyfly/pde)",
+      "Bash(python3 -m pytest tests/ -v)",
+      "Bash(pip3 --version)",
+      "Read(//Users/cboyfly/.pyenv/**)",
+      "Bash(conda info:*)",
+      "Bash(brew list:*)"
     ]
   }
 }

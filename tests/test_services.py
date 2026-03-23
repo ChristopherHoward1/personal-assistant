@@ -5,7 +5,7 @@ from datetime import date
 # Use in-memory DB for tests
 os.environ["PDE_TEST"] = "1"
 
-from pde.db import SQLModel, Task, Plan, Feedback, init_db, engine, get_session
+from pde.db import SQLModel, Task, Plan, Feedback, Annotation, init_db, engine, get_session
 from pde.services import (
     add_task,
     list_tasks,
@@ -13,6 +13,9 @@ from pde.services import (
     save_plan,
     get_recent_plans,
     log_feedback,
+    add_annotation,
+    list_annotations,
+    delete_annotation,
 )
 
 
@@ -117,3 +120,67 @@ class TestFeedback:
     def test_feedback_nonexistent_plan(self):
         with pytest.raises(ValueError, match="not found"):
             log_feedback(plan_id=9999, adherence=3, satisfaction=3, overload=3)
+
+
+class TestAnnotations:
+    def test_add_annotation(self):
+        ann = add_annotation(
+            start_date=date(2026, 3, 23),
+            end_date=date(2026, 3, 25),
+            label="traveling",
+            description="Conference in Austin",
+        )
+        assert ann.id is not None
+        assert ann.label == "traveling"
+        assert ann.start_date == date(2026, 3, 23)
+        assert ann.end_date == date(2026, 3, 25)
+
+    def test_add_annotation_single_day(self):
+        ann = add_annotation(
+            start_date=date(2026, 3, 27),
+            end_date=date(2026, 3, 27),
+            label="deadline",
+        )
+        assert ann.description is None
+        assert ann.start_date == ann.end_date
+
+    def test_list_annotations_by_date_range(self):
+        add_annotation(start_date=date(2026, 3, 23), end_date=date(2026, 3, 25), label="traveling")
+        add_annotation(start_date=date(2026, 3, 27), end_date=date(2026, 3, 27), label="deadline")
+        add_annotation(start_date=date(2026, 4, 1), end_date=date(2026, 4, 3), label="next week thing")
+
+        # Query the week of March 23-29
+        results = list_annotations(from_date=date(2026, 3, 23), to_date=date(2026, 3, 29))
+        assert len(results) == 2
+        assert results[0].label == "traveling"
+        assert results[1].label == "deadline"
+
+    def test_list_annotations_no_overlap(self):
+        add_annotation(start_date=date(2026, 4, 1), end_date=date(2026, 4, 3), label="future")
+
+        results = list_annotations(from_date=date(2026, 3, 23), to_date=date(2026, 3, 29))
+        assert results == []
+
+    def test_list_annotations_partial_overlap(self):
+        # Annotation starts before range, ends during range
+        add_annotation(start_date=date(2026, 3, 20), end_date=date(2026, 3, 24), label="overlaps start")
+
+        results = list_annotations(from_date=date(2026, 3, 23), to_date=date(2026, 3, 29))
+        assert len(results) == 1
+        assert results[0].label == "overlaps start"
+
+    def test_list_all_annotations(self):
+        add_annotation(start_date=date(2026, 3, 23), end_date=date(2026, 3, 25), label="a")
+        add_annotation(start_date=date(2026, 4, 1), end_date=date(2026, 4, 3), label="b")
+
+        results = list_annotations()
+        assert len(results) == 2
+
+    def test_delete_annotation(self):
+        ann = add_annotation(start_date=date(2026, 3, 23), end_date=date(2026, 3, 25), label="to delete")
+        delete_annotation(ann.id)
+        assert list_annotations() == []
+
+    def test_delete_nonexistent_annotation(self):
+        with pytest.raises(ValueError, match="not found"):
+            delete_annotation(9999)

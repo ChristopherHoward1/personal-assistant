@@ -3,7 +3,7 @@ from typing import Optional
 
 from sqlmodel import select
 
-from pde.db import Task, Plan, Feedback, get_session
+from pde.db import Task, Plan, Feedback, Annotation, get_session
 
 
 # ── Task CRUD ──────────────────────────────────────────────
@@ -111,6 +111,57 @@ def get_recent_plans(limit: int = 3) -> list[dict]:
                 } if fb else None,
             })
         return results
+
+
+# ── Feedback ───────────────────────────────────────────────
+
+
+# ── Annotation CRUD ────────────────────────────────────────
+
+
+def add_annotation(
+    start_date: date,
+    end_date: date,
+    label: str,
+    description: Optional[str] = None,
+) -> Annotation:
+    annotation = Annotation(
+        start_date=start_date,
+        end_date=end_date,
+        label=label,
+        description=description,
+    )
+    with get_session() as session:
+        session.add(annotation)
+        session.commit()
+        session.refresh(annotation)
+        return annotation
+
+
+def list_annotations(
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+) -> list[Annotation]:
+    """List annotations, optionally filtered to those overlapping a date range."""
+    with get_session() as session:
+        stmt = select(Annotation)
+        if from_date and to_date:
+            # Overlap: annotation.start <= range.end AND annotation.end >= range.start
+            stmt = stmt.where(
+                Annotation.start_date <= to_date,
+                Annotation.end_date >= from_date,
+            )
+        stmt = stmt.order_by(Annotation.start_date)
+        return list(session.exec(stmt).all())
+
+
+def delete_annotation(annotation_id: int) -> None:
+    with get_session() as session:
+        annotation = session.get(Annotation, annotation_id)
+        if not annotation:
+            raise ValueError(f"Annotation {annotation_id} not found")
+        session.delete(annotation)
+        session.commit()
 
 
 # ── Feedback ───────────────────────────────────────────────

@@ -46,6 +46,17 @@ class Feedback(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=None))
 
 
+class Annotation(SQLModel, table=True):
+    __tablename__ = "annotations"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    start_date: date
+    end_date: date
+    label: str
+    description: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=None))
+
+
 engine = create_engine(DATABASE_URL)
 
 

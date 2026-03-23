@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import anthropic
 
-from pde.services import list_tasks, get_recent_plans
+from pde.services import list_tasks, get_recent_plans, list_annotations
 
 TOOLS = [
     {
@@ -40,6 +40,24 @@ TOOLS = [
         },
     },
     {
+        "name": "get_annotations",
+        "description": "Retrieve annotations (constraints, travel, deadlines, events) overlapping a date range. Always check this when planning a week.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "start_date": {
+                    "type": "string",
+                    "description": "ISO date for range start.",
+                },
+                "end_date": {
+                    "type": "string",
+                    "description": "ISO date for range end.",
+                },
+            },
+            "required": ["start_date", "end_date"],
+        },
+    },
+    {
         "name": "get_week_context",
         "description": "Get info about the planning week: start date, end date, day count.",
         "input_schema": {
@@ -63,6 +81,7 @@ the user's workload, then produce a concrete weekly plan.
 
 Rules:
 - Call tools to gather context before making your plan.
+- Always check for annotations — these are constraints the user has flagged (travel, deadlines, busy days). Adjust the plan accordingly.
 - Be realistic about capacity. If the user was overloaded last week (overload >= 4), suggest fewer tasks.
 - Prioritize by due date and priority number (1 = highest).
 - Output your final plan as a clear, readable summary with:
@@ -101,6 +120,21 @@ def _execute_tool(name: str, input_data: dict) -> str:
         limit = input_data.get("limit", 3)
         plans = get_recent_plans(limit=limit)
         return json.dumps(plans)
+
+    elif name == "get_annotations":
+        sd = date.fromisoformat(input_data["start_date"])
+        ed = date.fromisoformat(input_data["end_date"])
+        annotations = list_annotations(from_date=sd, to_date=ed)
+        return json.dumps([
+            {
+                "id": a.id,
+                "label": a.label,
+                "description": a.description,
+                "start_date": str(a.start_date),
+                "end_date": str(a.end_date),
+            }
+            for a in annotations
+        ])
 
     elif name == "get_week_context":
         ws = date.fromisoformat(input_data["week_start"])

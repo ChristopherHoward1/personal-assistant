@@ -16,6 +16,9 @@ from pde.services import (
     save_plan,
     get_recent_plans,
     log_feedback,
+    add_annotation,
+    list_annotations,
+    delete_annotation,
 )
 from pde.agent import run_planning_agent
 
@@ -98,6 +101,82 @@ def task_done(task_id: int = typer.Argument(..., help="Task ID to mark as done")
     try:
         task = complete_task(task_id)
         console.print(f"[green]Completed:[/green] {task.title}")
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+# ── Annotation commands ────────────────────────────────────
+
+annotation_app = typer.Typer(help="Manage annotations (week constraints, events, notes)")
+app.add_typer(annotation_app, name="annotation")
+
+
+@annotation_app.command("add")
+def annotation_add(
+    label: str = typer.Argument(..., help="Annotation label (e.g. 'traveling', 'deadline')"),
+    start: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
+    end: Optional[str] = typer.Option(None, "--end", "-e", help="End date (YYYY-MM-DD). Defaults to start date."),
+    description: Optional[str] = typer.Option(None, "--desc", help="Optional description"),
+):
+    """Add an annotation to a date range."""
+    _ensure_db()
+    start_date = date.fromisoformat(start)
+    end_date = date.fromisoformat(end) if end else start_date
+    ann = add_annotation(
+        start_date=start_date,
+        end_date=end_date,
+        label=label,
+        description=description,
+    )
+    console.print(f"[green]Added annotation #{ann.id}:[/green] {ann.label} ({ann.start_date} → {ann.end_date})")
+
+
+@annotation_app.command("list")
+def annotation_list(
+    week: Optional[str] = typer.Option(None, "--week", "-w", help="Show annotations overlapping this week (YYYY-MM-DD Monday)"),
+):
+    """List annotations."""
+    _ensure_db()
+    if week:
+        from_date = date.fromisoformat(week)
+        to_date = from_date + timedelta(days=6)
+    else:
+        from_date = None
+        to_date = None
+
+    annotations = list_annotations(from_date=from_date, to_date=to_date)
+    if not annotations:
+        console.print("[dim]No annotations found.[/dim]")
+        return
+
+    table = Table(title="Annotations")
+    table.add_column("ID", style="dim", width=4)
+    table.add_column("Label")
+    table.add_column("Start", style="yellow")
+    table.add_column("End", style="yellow")
+    table.add_column("Description", style="cyan")
+
+    for a in annotations:
+        table.add_row(
+            str(a.id),
+            a.label,
+            str(a.start_date),
+            str(a.end_date),
+            a.description or "",
+        )
+    console.print(table)
+
+
+@annotation_app.command("remove")
+def annotation_remove(
+    annotation_id: int = typer.Argument(..., help="Annotation ID to remove"),
+):
+    """Remove an annotation."""
+    _ensure_db()
+    try:
+        delete_annotation(annotation_id)
+        console.print(f"[green]Removed annotation #{annotation_id}.[/green]")
     except ValueError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
