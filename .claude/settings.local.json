@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(pde task:*)",
+      "Bash(pde --help)",
+      "Bash(rm -f pde.db)",
+      "Bash(pde history:*)",
+      "Bash(mv /Users/cboyfly/pde/.env \"/Users/cboyfly/Documents/personal assistant/.env\")",
+      "Bash(mv /Users/cboyfly/pde/.gitignore \"/Users/cboyfly/Documents/personal assistant/.gitignore\")",
+      "Bash(rmdir /Users/cboyfly/pde)"
+    ]
+  }
+}
