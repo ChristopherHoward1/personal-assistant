@@ -4,7 +4,10 @@ from datetime import date, timedelta
 
 import anthropic
 
-from pde.services import list_tasks, get_recent_plans, list_annotations, get_week_stats
+from pde.services import (
+    add_task, add_annotation,
+    list_tasks, get_recent_plans, list_annotations, get_week_stats,
+)
 
 TOOLS = [
     {
@@ -280,6 +283,133 @@ def run_planning_agent(week_start: date, note: str | None = None) -> dict:
         messages.append({"role": "user", "content": tool_results})
 
     raise RuntimeError("Agent loop exhausted — too many steps without a final answer.")
+
+
+# ── Quick Input Agent ──────────────────────────────────────
+
+QUICK_TOOLS = [
+    {
+        "name": "create_task",
+        "description": "Create a task (an actionable item the user needs to do).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short, clear task title."},
+                "due_date": {"type": "string", "description": "ISO date (YYYY-MM-DD) if a deadline was mentioned."},
+                "priority": {"type": "integer", "description": "1=highest, 5=lowest. Default 3.", "minimum": 1, "maximum": 5},
+                "estimated_minutes": {"type": "integer", "description": "Rough time estimate if inferable."},
+                "category": {"type": "string", "description": "Category if obvious (e.g. 'work', 'personal', 'health')."},
+                "description": {"type": "string", "description": "Extra detail from the user's input."},
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "create_annotation",
+        "description": "Create an annotation (a time-bound event, appointment, or constraint — NOT an action item).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "description": "Short label (e.g. 'therapy', 'dentist', 'team offsite')."},
+                "start_date": {"type": "string", "description": "ISO date (YYYY-MM-DD)."},
+                "end_date": {"type": "string", "description": "ISO date (YYYY-MM-DD). Same as start_date for single-day events."},
+                "description": {"type": "string", "description": "Details like time, location, or notes."},
+            },
+            "required": ["label", "start_date", "end_date"],
+        },
+    },
+]
+
+QUICK_SYSTEM_PROMPT = """\
+You are a quick-capture assistant. The user will describe tasks, events, and reminders in natural language. \
+Your job is to parse their input and create the right items using your tools.
+
+Today's date: {today}
+
+Rules:
+- Appointments, meetings, and events with specific times → create_annotation (these block time, they're not tasks)
+- Action items, to-dos, and reminders → create_task
+- If something has both (e.g. "remember to prep for therapy before Saturday"), create both: annotation for the event, task for the prep
+- Resolve relative dates: "Saturday" = the upcoming Saturday, "Friday" = the upcoming Friday, "next week" = next Monday, etc.
+- Put specific times in the annotation description (e.g. "at 2pm")
+- Set reasonable priorities: explicit deadlines get priority 2, casual items get priority 3-4
+- Keep titles short and actionable
+- Call all relevant tools, then end your turn with a brief confirmation of what you created. No extra commentary.
+"""
+
+MAX_QUICK_STEPS = 6
+
+
+def _execute_quick_tool(name: str, input_data: dict) -> dict:
+    """Execute a quick-input tool. Returns the created object info."""
+    if name == "create_task":
+        due = date.fromisoformat(input_data["due_date"]) if input_data.get("due_date") else None
+        task = add_task(
+            title=input_data["title"],
+            due_date=due,
+            priority=input_data.get("priority", 3),
+            estimated_minutes=input_data.get("estimated_minutes"),
+            category=input_data.get("category"),
+            description=input_data.get("description"),
+        )
+        return {"type": "task", "id": task.id, "title": task.title, "due_date": str(task.due_date) if task.due_date else None}
+
+    elif name == "create_annotation":
+        ann = add_annotation(
+            start_date=date.fromisoformat(input_data["start_date"]),
+            end_date=date.fromisoformat(input_data["end_date"]),
+            label=input_data["label"],
+            description=input_data.get("description"),
+        )
+        return {"type": "annotation", "id": ann.id, "label": ann.label, "start_date": str(ann.start_date)}
+
+    return {"error": f"Unknown tool: {name}"}
+
+
+def run_quick_agent(user_input: str) -> dict:
+    """Parse natural language into tasks and annotations.
+
+    Returns {
+        "created": [{"type": "task"|"annotation", "id": int, ...}, ...],
+        "summary": str,  # agent's confirmation text
+    }
+    """
+    client = anthropic.Anthropic()
+    model = os.environ.get("PDE_MODEL", "claude-haiku-4-5-20251001")
+
+    system = QUICK_SYSTEM_PROMPT.format(today=date.today().isoformat())
+    messages = [{"role": "user", "content": user_input}]
+    created = []
+
+    for step in range(MAX_QUICK_STEPS):
+        response = client.messages.create(
+            model=model,
+            max_tokens=2048,
+            system=system,
+            tools=QUICK_TOOLS,
+            messages=messages,
+        )
+
+        if response.stop_reason == "end_turn":
+            summary = "".join(b.text for b in response.content if b.type == "text")
+            return {"created": created, "summary": summary}
+
+        # Process tool calls
+        tool_results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                result = _execute_quick_tool(block.name, block.input)
+                created.append(result)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps(result),
+                })
+
+        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "user", "content": tool_results})
+
+    return {"created": created, "summary": "Items created (agent loop ended)."}
 
 
 def _serialize_block(block) -> dict:

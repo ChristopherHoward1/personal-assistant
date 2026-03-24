@@ -27,7 +27,7 @@ from pde.services import (
     list_annotations,
     delete_annotation,
 )
-from pde.agent import run_planning_agent
+from pde.agent import run_planning_agent, run_quick_agent
 
 app = typer.Typer(help="PDE — Personal weekly planner with agentic AI")
 console = Console()
@@ -187,6 +187,41 @@ def annotation_remove(
     except ValueError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
+
+
+# ── Quick input command ────────────────────────────────────
+
+
+@app.command("quick")
+def quick(
+    text: str = typer.Argument(..., help="Natural language input describing tasks, events, or reminders."),
+):
+    """Quickly add tasks and events using natural language.
+
+    Examples:
+        pde quick "therapy Saturday at 2pm, dentist Monday at 10am"
+        pde quick "email Alice about the proposal by Friday"
+        pde quick "team offsite next Tue-Thu, prep slides by Monday"
+    """
+    _ensure_db()
+
+    console.print(f"[dim]Parsing:[/dim] {text}\n")
+
+    try:
+        result = run_quick_agent(text)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    for item in result["created"]:
+        if item.get("type") == "task":
+            due_str = f" (due {item['due_date']})" if item.get("due_date") else ""
+            console.print(f"  [green]+ Task #{item['id']}:[/green] {item['title']}{due_str}")
+        elif item.get("type") == "annotation":
+            console.print(f"  [blue]+ Event #{item['id']}:[/blue] {item['label']} ({item['start_date']})")
+
+    if not result["created"]:
+        console.print("[yellow]No items created.[/yellow]")
 
 
 # ── Plan command ───────────────────────────────────────────

@@ -29,7 +29,8 @@
       "Bash(.venv/bin/pip install:*)",
       "Bash(.venv/bin/python -c \"from dotenv import load_dotenv; from pathlib import Path; p = Path\\(''src/pde/cli.py''\\).resolve\\(\\).parent.parent.parent / ''.env''; print\\(''env path:'', p, ''exists:'', p.exists\\(\\)\\); load_dotenv\\(p\\); import os; key = os.environ.get\\(''ANTHROPIC_API_KEY'', ''''\\); print\\(''key set:'', bool\\(key\\), ''prefix:'', key[:10] if key else ''NONE''\\)\")",
       "Bash(.venv/bin/python -c \"from dotenv import load_dotenv; load_dotenv\\(''.env''\\); import os; key = os.environ.get\\(''ANTHROPIC_API_KEY'', ''''\\); print\\(''key set:'', bool\\(key\\), ''prefix:'', key[:10] if key else ''NONE''\\)\")",
-      "Bash(.venv/bin/python -c \":*)"
+      "Bash(.venv/bin/python -c \":*)",
+      "Bash(.venv/bin/pde quick:*)"
     ]
   }
 }

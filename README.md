@@ -1,54 +1,10 @@
 # PDE — Personal Decision Engine
 
-A local-first CLI tool that uses Claude to help plan your week. Tasks and plans
-are stored in SQLite. The agent uses Claude (via Anthropic API) with tool calling
-to gather context about your workload before generating a structured plan.
+A local-first CLI tool that uses Claude Haiku to help you organize your week.
+Add tasks and events in plain English, generate a weekly plan, and track what
+actually got done. Everything is stored in SQLite on your machine.
 
-## Status: V1 — Core Loop Complete
-
-What works today:
-- Task CRUD (add, list, mark done)
-- Annotations (tag weeks with constraints: travel, deadlines, busy days)
-- Agentic weekly planning via Claude with structured output (`submit_plan` tool)
-- Task-level feedback (walk through each priority task, mark done/not done)
-- Workload stats (agent sees task counts, estimated hours, due dates at a glance)
-- Plan history with feedback scores and task-level results
-- User notes on plans (`--note "focus on deep work"`)
-- SQLite persistence (4 tables: tasks, plans, feedback, annotations)
-- 26 tests covering services layer
-
-What does **not** exist yet:
-- Weekly summaries
-- Preference extraction / learning
-- Calendar integration (Apple Calendar via osascript — planned for V2)
-
-## Harsh Self-Critique
-
-The [original spec](#v1-spec-notes) proposed 8 database tables, 5 milestones,
-preference extraction, summaries, and an LLM repair pipeline.
-Here's what was wrong with that plan:
-
-1. **The spec was a V3, not a V1.** A real V1 is: add tasks, generate a plan,
-   log if it worked. That's what exists now.
-
-2. **DeepSeek-R1 via Ollama was the wrong call.** R1 is a reasoning model that
-   needs 30+ GB of RAM to run locally and is notoriously bad at structured
-   output. Claude Haiku via API is faster, cheaper, better at tool calling,
-   and already working here.
-
-3. **The schema was over-engineered.** `decision_requests`,
-   `decision_context_snapshots`, `decision_options`, `decision_outcomes` — four
-   tables to represent "I made a plan and it went okay." The current schema
-   (tasks, plans, feedback, annotations) does the same job in four tables.
-
-4. **"Preference extraction" in V1 is scope creep.** Collect 8+ weeks of
-   feedback data first, then look for patterns.
-
-5. **The structured output repair pipeline solves the wrong problem.** Claude's
-   tool calling (`submit_plan`) returns structured JSON natively. No parsing,
-   no repair, no retry needed.
-
-## Setup
+## Quick Start
 
 ```bash
 python3 -m venv .venv
@@ -56,29 +12,46 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Create a `.env` file (already gitignored):
+Create a `.env` file (gitignored):
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Or export directly:
+## How to Use It
+
+### 1. Dump everything into quick capture
+
+The fastest way to get things into PDE. Just describe your week:
+
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+pde quick "therapy Saturday at 2pm, hand specialist at 4pm, email Alice about the project by Friday"
 ```
 
-## Usage
+```
+  + Event #1: therapy (2026-03-28)
+  + Event #2: hand specialist appointment (2026-03-28)
+  + Task #1:  Send Alice email about project update (due 2026-03-27)
+```
 
-### Manage tasks
+The agent figures out what's a task (something you need to do) vs. an event
+(something that blocks time) and creates the right thing. Relative dates like
+"Saturday" and "Friday" are resolved automatically.
+
+```bash
+pde quick "team offsite next Tue through Thu, prep slides by Monday"
+pde quick "dentist Wednesday 9am, pick up dry cleaning, finish code review by EOD Friday"
+```
+
+### 2. Manage tasks directly (when you want precision)
 
 ```bash
 pde task add "Write quarterly report" --priority 1 --due 2026-03-27 --minutes 120 --category work
-pde task add "Grocery shopping" --priority 3 --category personal
 pde task list
 pde task list --status open --category work
 pde task done 1
 ```
 
-### Annotate your week
+### 3. Annotate your week
 
 Flag constraints so the planner knows what's going on:
 
@@ -86,11 +59,14 @@ Flag constraints so the planner knows what's going on:
 pde annotation add "traveling" --start 2026-03-23 --end 2026-03-25
 pde annotation add "deadline: quarterly report" --start 2026-03-27
 pde annotation list
-pde annotation list --week 2026-03-23    # annotations overlapping this week
+pde annotation list --week 2026-03-23
 pde annotation remove 1
 ```
 
-### Generate a weekly plan
+(Quick capture also creates annotations automatically for events and
+appointments.)
+
+### 4. Generate a weekly plan
 
 ```bash
 pde plan                                  # this week (Mon-Wed) or next week (Thu-Sun)
@@ -98,45 +74,77 @@ pde plan --date 2026-03-23               # plan a specific week
 pde plan --note "light week, deep work"  # give the planner extra context
 ```
 
-The agent will:
-1. Get a workload snapshot (task counts, estimated hours, due dates)
-2. Check for annotations (travel, deadlines, constraints)
-3. Retrieve your open tasks
-4. Review past plans and feedback
-5. Call `submit_plan` with a structured plan:
-   - Priority tasks (with reasons)
-   - Deferred tasks (with reasons)
-   - Weekly strategy
-   - Overload risk (low/medium/high)
+The agent gathers your open tasks, checks for annotations and constraints,
+reviews past plans and feedback, then delivers a structured plan:
 
-### Log feedback
+```
+╭──────────────── Week Plan #1 (2026-03-23 → 2026-03-29) ─────────────────╮
+│ Priority Tasks                                                           │
+│  1. Write quarterly report (due Fri 3/27) — 2 hours                     │
+│  2. Review PR backlog (due Wed 3/25) — 1 hour                           │
+│                                                                          │
+│ Constraints                                                              │
+│  • Tue 3/24: Back-to-back meetings all day                               │
+│  • Sat 3/28: Therapy at 2pm, hand specialist at 4pm                     │
+│                                                                          │
+│ Deferred                                                                 │
+│  • Grocery shopping → next week (no time pressure)                       │
+╰──────────────────────────────────────────────────────────────────────────╯
 
-After the week, review how the plan went:
+  Overload risk: low
+  Priority tasks: 2  |  Deferred: 1
+```
+
+### 5. Close the loop with feedback
+
+After the week, tell PDE what actually happened:
 
 ```bash
 pde feedback 1
 ```
 
-If the plan has structured data, you'll walk through each priority task:
 ```
 Priority tasks — did you complete them?
-  Write quarterly report (#3)? [y/N]
-  Review PR backlog (#5)? [y/N]
+  Write quarterly report (#1)? [y/N]: y
+  Review PR backlog (#3)? [y/N]: n
+
+Adherence (how closely did you follow the plan?): 4
+Satisfaction (how good was the plan?): 4
+Overload (how overwhelmed were you?): 2
+Notes (optional): Report took longer than expected, PR review slipped
+
+Feedback logged.
+  Scores: adherence=4 satisfaction=4 overload=2
+  Tasks completed: 1/2
 ```
 
-Completed tasks are automatically marked done. Then you rate:
-- Adherence (1–5): how closely you followed the plan
-- Satisfaction (1–5): how good the plan was
-- Overload (1–5): how overwhelmed you were
+Completed tasks are automatically marked done. The feedback — scores and
+task-level results — feeds into future plans so the agent learns what's
+realistic for you.
 
-This feedback — including task-level results — is visible to the agent
-when planning future weeks.
-
-### View history
+### 6. Review past plans
 
 ```bash
 pde history             # last 5 plans
 pde history --limit 10  # last 10
+```
+
+## Typical Weekly Workflow
+
+```
+Monday morning:
+  pde quick "..."              ← dump everything on your mind
+  pde plan                     ← get a structured plan for the week
+
+During the week:
+  pde quick "..."              ← add things as they come up
+  pde task done 5              ← check off tasks as you finish them
+
+End of week:
+  pde feedback 1               ← review what got done, rate the plan
+
+Next Monday:
+  pde plan                     ← new plan, informed by last week's feedback
 ```
 
 ## Configuration
@@ -144,7 +152,10 @@ pde history --limit 10  # last 10
 | Env var | Default | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | *(required)* | Your Anthropic API key |
-| `PDE_MODEL` | `claude-haiku-4-5-20251001` | Model to use for planning |
+| `PDE_MODEL` | `claude-haiku-4-5-20251001` | Model used for all agent calls |
+
+All agent calls (planning, quick capture) use Claude Haiku. Fast, cheap,
+and good enough for task parsing and weekly planning.
 
 ## Architecture
 
@@ -152,46 +163,18 @@ pde history --limit 10  # last 10
 src/pde/
   db.py         SQLite models (tasks, plans, feedback, annotations)
   services.py   Business logic (CRUD, stats, plan storage, feedback)
-  agent.py      Agentic planning loop (Anthropic SDK + tool calling)
+  agent.py      Agent loops — planning + quick capture (Anthropic SDK)
   cli.py        Typer CLI with Rich output
 ```
 
-### Agent tools
+**4 tables:** tasks, plans, feedback, annotations.
 
-The planning agent has five tools it can call:
+**2 agent loops**, same pattern (tool-calling loop → structured output):
 
-| Tool | Purpose |
-|---|---|
-| `get_week_context` | Workload snapshot: task counts, estimated hours, high-priority count |
-| `get_annotations` | Constraints overlapping the planning week |
-| `get_open_tasks` | Full task list, filterable by category/due date |
-| `get_recent_plans` | Past plans with feedback scores and task-level results |
-| `submit_plan` | Deliver the structured plan (required to finish) |
-
-### Planning loop
-
-```
-User runs: pde plan
-  → Agent calls get_week_context (workload dashboard)
-  → Agent calls get_annotations (constraints)
-  → Agent calls get_open_tasks (full list)
-  → Agent optionally calls get_recent_plans (past feedback)
-  → Agent reasons about priorities and capacity
-  → Agent calls submit_plan with structured output
-  → Plan is stored (text + JSON + interaction trace)
-  → User sees the plan + overload risk
-```
-
-### Feedback loop
-
-```
-User runs: pde feedback <plan-id>
-  → Walk through each priority task (complete? y/n)
-  → Completed tasks marked done in DB
-  → Rate adherence / satisfaction / overload
-  → Task results + scores stored
-  → Future plans see what worked and what didn't
-```
+| Agent | Tools | Purpose |
+|---|---|---|
+| **Planner** | `get_week_context`, `get_annotations`, `get_open_tasks`, `get_recent_plans`, `submit_plan` | Generate a weekly plan from your tasks, constraints, and history |
+| **Quick capture** | `create_task`, `create_annotation` | Parse natural language into tasks and events |
 
 ## Testing
 
@@ -203,14 +186,8 @@ pytest -v
 26 tests covering: task CRUD, plan storage, feedback (with task results),
 week stats, annotations (overlap filtering, partial overlap, deletion).
 
-## V1 Spec Notes
+## What's Next
 
-The original spec is preserved in `docs/v1-spec.md` for reference. It contains
-good ideas for V2+, but the current implementation intentionally deviates
-from it in favor of shipping something usable first.
-
-## What's next
-
-- [ ] **Weekly summary** — after feedback, generate a short retrospective
-- [ ] **Apple Calendar sync** — push time blocks via `osascript` (`--sync-calendar` flag)
-- [ ] **Use it for 2 real weeks** — then decide what V2 needs based on actual friction
+- [ ] **Weekly summary** — auto-generate a retrospective after feedback
+- [ ] **Apple Calendar sync** — push events/time blocks to Calendar.app
+- [ ] **Simple UI** — lightweight web interface for input and feedback
