@@ -43,6 +43,7 @@ class Feedback(SQLModel, table=True):
     satisfaction: int = Field(ge=1, le=5)
     overload: int = Field(ge=1, le=5)  # 1 = underloaded, 5 = overwhelmed
     notes: Optional[str] = None
+    task_results_json: Optional[str] = None  # JSON: [{"task_id": 1, "title": "...", "completed": true}, ...]
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=None))
 
 

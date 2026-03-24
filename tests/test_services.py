@@ -11,7 +11,9 @@ from pde.services import (
     list_tasks,
     complete_task,
     save_plan,
+    get_plan,
     get_recent_plans,
+    get_week_stats,
     log_feedback,
     add_annotation,
     list_annotations,
@@ -117,9 +119,55 @@ class TestFeedback:
         assert fb.id is not None
         assert fb.adherence == 3
 
+    def test_log_feedback_with_task_results(self):
+        plan = save_plan(week_start=date(2026, 3, 23), plan_text="Test")
+        task_results = [
+            {"task_id": 1, "title": "Write tests", "completed": True},
+            {"task_id": 2, "title": "Deploy", "completed": False},
+        ]
+        fb = log_feedback(
+            plan_id=plan.id, adherence=4, satisfaction=3, overload=2,
+            task_results=task_results,
+        )
+        assert fb.task_results_json is not None
+        import json
+        results = json.loads(fb.task_results_json)
+        assert len(results) == 2
+        assert results[0]["completed"] is True
+        assert results[1]["completed"] is False
+
     def test_feedback_nonexistent_plan(self):
         with pytest.raises(ValueError, match="not found"):
             log_feedback(plan_id=9999, adherence=3, satisfaction=3, overload=3)
+
+
+class TestWeekStats:
+    def test_week_stats_empty(self):
+        stats = get_week_stats(date(2026, 3, 23))
+        assert stats["open_task_count"] == 0
+        assert stats["due_this_week_count"] == 0
+        assert stats["total_estimated_minutes"] == 0
+
+    def test_week_stats_with_tasks(self):
+        add_task(title="Due this week", priority=1, estimated_minutes=60, due_date=date(2026, 3, 25))
+        add_task(title="Due next week", priority=3, estimated_minutes=30, due_date=date(2026, 4, 1))
+        add_task(title="High priority no due", priority=2, estimated_minutes=45)
+
+        stats = get_week_stats(date(2026, 3, 23))
+        assert stats["open_task_count"] == 3
+        assert stats["due_this_week_count"] == 1
+        assert stats["high_priority_count"] == 2  # priority 1 and 2
+        assert stats["total_estimated_minutes"] == 135
+        assert stats["week_estimated_minutes"] == 60
+
+    def test_get_plan(self):
+        plan = save_plan(week_start=date(2026, 3, 23), plan_text="Test")
+        fetched = get_plan(plan.id)
+        assert fetched is not None
+        assert fetched.plan_text == "Test"
+
+    def test_get_plan_nonexistent(self):
+        assert get_plan(9999) is None
 
 
 class TestAnnotations:

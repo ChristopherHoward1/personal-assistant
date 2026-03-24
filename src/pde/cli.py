@@ -1,8 +1,14 @@
 import json
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
 import typer
+
+# Load .env from project root (walk up from this file)
+_env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(_env_path, override=True)
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -14,6 +20,7 @@ from pde.services import (
     list_tasks,
     complete_task,
     save_plan,
+    get_plan,
     get_recent_plans,
     log_feedback,
     add_annotation,
@@ -189,7 +196,11 @@ def annotation_remove(
 def plan(
     date_str: Optional[str] = typer.Option(
         None, "--date", "-d",
-        help="Monday to plan for (YYYY-MM-DD). Defaults to next Monday.",
+        help="Monday to plan for (YYYY-MM-DD). Defaults to this Monday (or next if past Wednesday).",
+    ),
+    note: Optional[str] = typer.Option(
+        None, "--note", "-n",
+        help="Context for the planner (e.g. 'light week, focus on deep work').",
     ),
 ):
     """Generate a weekly plan using the AI agent."""
@@ -199,22 +210,28 @@ def plan(
         week_start = date.fromisoformat(date_str)
     else:
         today = date.today()
-        days_until_monday = (7 - today.weekday()) % 7
-        if days_until_monday == 0:
-            days_until_monday = 7
-        week_start = today + timedelta(days=days_until_monday)
+        weekday = today.weekday()  # 0=Mon
+        if weekday <= 2:
+            # Mon-Wed: plan this week (rewind to Monday)
+            week_start = today - timedelta(days=weekday)
+        else:
+            # Thu-Sun: plan next week
+            week_start = today + timedelta(days=(7 - weekday))
 
     console.print(f"[bold]Planning week of {week_start}...[/bold]\n")
 
     try:
-        result = run_planning_agent(week_start)
+        result = run_planning_agent(week_start, note=note)
     except Exception as e:
         console.print(f"[red]Agent error:[/red] {e}")
         raise typer.Exit(1)
 
+    plan_json_str = json.dumps(result["plan_json"]) if result.get("plan_json") else None
+
     plan_obj = save_plan(
         week_start=week_start,
         plan_text=result["plan_text"],
+        plan_json=plan_json_str,
         interaction_trace=json.dumps(result["trace"]),
     )
 
@@ -223,6 +240,14 @@ def plan(
         title=f"Week Plan #{plan_obj.id} ({week_start} → {plan_obj.week_end})",
         border_style="blue",
     ))
+
+    # Show structured summary if available
+    pj = result.get("plan_json")
+    if pj:
+        risk_color = {"low": "green", "medium": "yellow", "high": "red"}.get(pj.get("overload_risk", ""), "white")
+        console.print(f"\n  Overload risk: [{risk_color}]{pj.get('overload_risk', '?')}[/{risk_color}]")
+        console.print(f"  Priority tasks: {len(pj.get('priority_tasks', []))}  |  Deferred: {len(pj.get('defer_tasks', []))}")
+
     console.print(f"\n[dim]Plan saved as #{plan_obj.id}. Use 'pde feedback {plan_obj.id}' later to log how it went.[/dim]")
 
 
@@ -233,10 +258,38 @@ def plan(
 def feedback(
     plan_id: int = typer.Argument(..., help="Plan ID to give feedback on"),
 ):
-    """Log feedback on how a plan went."""
+    """Log feedback on how a plan went, including task-level results."""
     _ensure_db()
 
-    console.print(f"[bold]Feedback for plan #{plan_id}[/bold]\n")
+    plan_obj = get_plan(plan_id)
+    if not plan_obj:
+        console.print(f"[red]Plan #{plan_id} not found.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]Feedback for plan #{plan_id} ({plan_obj.week_start} → {plan_obj.week_end})[/bold]\n")
+
+    # Task-level feedback if we have structured plan data
+    task_results = []
+    if plan_obj.plan_json:
+        plan_data = json.loads(plan_obj.plan_json)
+        priority_tasks = plan_data.get("priority_tasks", [])
+        if priority_tasks:
+            console.print("[bold]Priority tasks — did you complete them?[/bold]")
+            for pt in priority_tasks:
+                done = typer.confirm(f"  {pt['title']} (#{pt['task_id']})?", default=False)
+                task_results.append({
+                    "task_id": pt["task_id"],
+                    "title": pt["title"],
+                    "completed": done,
+                })
+                # Mark task as done in DB if completed
+                if done:
+                    try:
+                        complete_task(pt["task_id"])
+                    except ValueError:
+                        pass  # task may already be done or deleted
+            console.print()
+
     console.print("[dim]Rate 1-5 for each (1=lowest, 5=highest):[/dim]")
 
     adherence = typer.prompt("Adherence (how closely did you follow the plan?)", type=int)
@@ -256,8 +309,14 @@ def feedback(
             satisfaction=satisfaction,
             overload=overload,
             notes=notes or None,
+            task_results=task_results or None,
         )
-        console.print(f"\n[green]Feedback logged.[/green] (adherence={fb.adherence}, satisfaction={fb.satisfaction}, overload={fb.overload})")
+        done_count = sum(1 for t in task_results if t["completed"]) if task_results else 0
+        total_count = len(task_results) if task_results else 0
+        console.print(f"\n[green]Feedback logged.[/green]")
+        console.print(f"  Scores: adherence={fb.adherence} satisfaction={fb.satisfaction} overload={fb.overload}")
+        if task_results:
+            console.print(f"  Tasks completed: {done_count}/{total_count}")
     except ValueError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)

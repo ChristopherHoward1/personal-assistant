@@ -14,7 +14,22 @@
       "Bash(pip3 --version)",
       "Read(//Users/cboyfly/.pyenv/**)",
       "Bash(conda info:*)",
-      "Bash(brew list:*)"
+      "Bash(brew list:*)",
+      "Read(//Users/cboyfly/Library/Python/**)",
+      "Bash(pip3 list:*)",
+      "Bash(.venv/bin/python -m pytest tests/ -v)",
+      "Bash(.venv/bin/pip show:*)",
+      "Bash(.venv/bin/python -c \"from pde.db import engine; from sqlalchemy import inspect; print\\(inspect\\(engine\\).get_table_names\\(\\)\\)\")",
+      "Bash(.venv/bin/python -c \"from pde.db import engine; from sqlalchemy import inspect; cols = [c[''name''] for c in inspect\\(engine\\).get_columns\\(''feedback''\\)]; print\\(''feedback columns:'', cols\\)\")",
+      "Bash(.venv/bin/python -c \"from pde.db import init_db; init_db\\(\\); print\\(''DB initialized''\\)\")",
+      "Bash(.venv/bin/python -c \"from pde.db import engine; from sqlalchemy import inspect; print\\(''Tables:'', inspect\\(engine\\).get_table_names\\(\\)\\)\")",
+      "Bash(.venv/bin/pde task:*)",
+      "Bash(.venv/bin/pde annotation:*)",
+      "Bash(.venv/bin/pde plan:*)",
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(.venv/bin/python -c \"from dotenv import load_dotenv; from pathlib import Path; p = Path\\(''src/pde/cli.py''\\).resolve\\(\\).parent.parent.parent / ''.env''; print\\(''env path:'', p, ''exists:'', p.exists\\(\\)\\); load_dotenv\\(p\\); import os; key = os.environ.get\\(''ANTHROPIC_API_KEY'', ''''\\); print\\(''key set:'', bool\\(key\\), ''prefix:'', key[:10] if key else ''NONE''\\)\")",
+      "Bash(.venv/bin/python -c \"from dotenv import load_dotenv; load_dotenv\\(''.env''\\); import os; key = os.environ.get\\(''ANTHROPIC_API_KEY'', ''''\\); print\\(''key set:'', bool\\(key\\), ''prefix:'', key[:10] if key else ''NONE''\\)\")",
+      "Bash(.venv/bin/python -c \":*)"
     ]
   }
 }

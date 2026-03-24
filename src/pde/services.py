@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime, timedelta
 from typing import Optional
 
@@ -59,6 +60,35 @@ def complete_task(task_id: int) -> Task:
         return task
 
 
+# ── Week stats ─────────────────────────────────────────────
+
+
+def get_week_stats(week_start: date) -> dict:
+    """Compute workload stats for a given week. Used by the agent's get_week_context tool."""
+    week_end = week_start + timedelta(days=6)
+    open_tasks = list_tasks(status="open")
+
+    due_this_week = [
+        t for t in open_tasks
+        if t.due_date and week_start <= t.due_date <= week_end
+    ]
+    high_priority = [t for t in open_tasks if t.priority <= 2]
+
+    total_minutes = sum(t.estimated_minutes or 0 for t in open_tasks)
+    week_minutes = sum(t.estimated_minutes or 0 for t in due_this_week)
+
+    return {
+        "week_start": str(week_start),
+        "week_end": str(week_end),
+        "today": str(date.today()),
+        "open_task_count": len(open_tasks),
+        "due_this_week_count": len(due_this_week),
+        "high_priority_count": len(high_priority),
+        "total_estimated_minutes": total_minutes,
+        "week_estimated_minutes": week_minutes,
+    }
+
+
 # ── Plan helpers ───────────────────────────────────────────
 
 
@@ -85,6 +115,11 @@ def save_plan(
         return plan
 
 
+def get_plan(plan_id: int) -> Optional[Plan]:
+    with get_session() as session:
+        return session.get(Plan, plan_id)
+
+
 def get_recent_plans(limit: int = 3) -> list[dict]:
     """Return recent plans with their feedback joined."""
     with get_session() as session:
@@ -98,17 +133,22 @@ def get_recent_plans(limit: int = 3) -> list[dict]:
             fb = session.exec(
                 select(Feedback).where(Feedback.plan_id == p.id)
             ).first()
+            fb_data = None
+            if fb:
+                fb_data = {
+                    "adherence": fb.adherence,
+                    "satisfaction": fb.satisfaction,
+                    "overload": fb.overload,
+                    "notes": fb.notes,
+                }
+                if fb.task_results_json:
+                    fb_data["task_results"] = json.loads(fb.task_results_json)
             results.append({
                 "id": p.id,
                 "week_start": str(p.week_start),
                 "week_end": str(p.week_end),
                 "plan_text": p.plan_text,
-                "feedback": {
-                    "adherence": fb.adherence,
-                    "satisfaction": fb.satisfaction,
-                    "overload": fb.overload,
-                    "notes": fb.notes,
-                } if fb else None,
+                "feedback": fb_data,
             })
         return results
 
@@ -173,6 +213,7 @@ def log_feedback(
     satisfaction: int,
     overload: int,
     notes: Optional[str] = None,
+    task_results: Optional[list[dict]] = None,
 ) -> Feedback:
     with get_session() as session:
         plan = session.get(Plan, plan_id)
@@ -184,6 +225,7 @@ def log_feedback(
             satisfaction=satisfaction,
             overload=overload,
             notes=notes,
+            task_results_json=json.dumps(task_results) if task_results else None,
         )
         session.add(fb)
         session.commit()
