@@ -186,6 +186,58 @@ pytest -v
 26 tests covering: task CRUD, plan storage, feedback (with task results),
 week stats, annotations (overlap filtering, partial overlap, deletion).
 
+## Data Model: Designed for Future Learning
+
+Every interaction with PDE generates structured data that accumulates over
+time. The SQLite database isn't just persistence — it's a training dataset
+being built through normal use.
+
+### What gets captured
+
+| Table | What it records | ML signal |
+|---|---|---|
+| **tasks** | What you committed to, estimated time, priority, category, whether it got done | Task completion patterns, estimation accuracy |
+| **plans** | Structured plan JSON (priority tasks, deferred tasks, strategy, overload risk) + full agent interaction trace | What plans you accepted, how many tasks per week works |
+| **feedback** | Adherence, satisfaction, overload scores + per-task completion booleans | Your actual capacity vs. planned capacity, what overload looks like |
+| **annotations** | Constraints per week (travel, meetings, deadlines) | How constraints affect completion rates and satisfaction |
+
+### What becomes possible with 8+ weeks of data
+
+**Estimation calibration** — Compare `estimated_minutes` at task creation
+against actual completion patterns. If you consistently finish 60-minute tasks
+but not 120-minute ones, the planner should learn your real throughput.
+
+**Overload prediction** — Correlate `overload_score` with the number of
+priority tasks, total estimated minutes, annotation density, and high-priority
+count. A simple logistic regression could flag "this plan will overwhelm you"
+before Monday.
+
+**Deferral patterns** — Track which tasks get deferred across multiple plans.
+"You've deferred X three times — either do it, delegate it, or drop it" is a
+rule that writes itself from the data.
+
+**Category-based capacity** — Your capacity for deep work (category=work,
+high priority) vs. errands (category=personal, low priority) may be very
+different. The data separates these naturally.
+
+**Day-of-week effects** — Annotations capture when constraints cluster.
+Combined with feedback, this reveals patterns like "plans that load Tuesday
+heavily always score low on satisfaction."
+
+### How to get there
+
+The current system doesn't need to change. The structured data from
+`plan_json`, `task_results_json`, and feedback scores is already in the right
+shape. When enough weeks accumulate:
+
+1. Export with `sqlite3 pde.db` — it's all local, no API needed
+2. A Jupyter notebook with pandas can produce the first insights in an hour
+3. Predictive features get folded back into `get_week_stats` as new heuristics
+4. Eventually, a lightweight model replaces the hand-tuned scoring
+
+The key insight: **you don't build the ML system first and hope for data.
+You build the data collection into normal use and let the models come later.**
+
 ## What's Next
 
 - [ ] **Weekly summary** — auto-generate a retrospective after feedback
