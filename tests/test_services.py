@@ -1,9 +1,10 @@
 import os
+import tempfile
 import pytest
 from datetime import date
 
-# Use in-memory DB for tests
-os.environ["PDE_TEST"] = "1"
+# Point DB to a temp directory for tests
+os.environ["PDE_DATA_DIR"] = tempfile.mkdtemp()
 
 from pde.db import SQLModel, Task, Plan, Feedback, Annotation, init_db, engine, get_session
 from pde.services import (

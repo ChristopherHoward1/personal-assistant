@@ -1,9 +1,14 @@
+import os
 from datetime import date, datetime
+from pathlib import Path
 from typing import Optional
 
 from sqlmodel import Field, SQLModel, create_engine, Session
 
-DATABASE_URL = "sqlite:///pde.db"
+# Store DB in ~/.pde/ so data is decoupled from the project directory
+_pde_dir = Path(os.environ.get("PDE_DATA_DIR", Path.home() / ".pde"))
+_pde_dir.mkdir(parents=True, exist_ok=True)
+DATABASE_URL = f"sqlite:///{_pde_dir / 'pde.db'}"
 
 
 class Task(SQLModel, table=True):

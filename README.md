@@ -262,12 +262,31 @@ src/pde/
 | **Planner** | `get_week_context`, `get_annotations`, `get_open_tasks`, `get_recent_plans`, `submit_plan` | Generate a weekly plan from tasks, constraints, and history |
 | **Quick capture** | `create_task`, `create_annotation` | Parse natural language into tasks and events |
 
+### Data storage
+
+Your data lives in `~/.pde/pde.db` — outside the project directory. This
+means:
+- Each user on a machine gets their own database automatically
+- Re-cloning or moving the project doesn't touch your data
+- The database never gets accidentally committed to git
+
+To use a custom location:
+```bash
+export PDE_DATA_DIR=/path/to/your/data
+```
+
+To start fresh, just delete the file:
+```bash
+rm ~/.pde/pde.db
+```
+
 ### Configuration
 
 | Env var | Default | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | *(required)* | Your Anthropic API key |
 | `PDE_MODEL` | `claude-haiku-4-5-20251001` | Model used for all agent calls |
+| `PDE_DATA_DIR` | `~/.pde` | Directory for the SQLite database |
 
 ### Testing
 
