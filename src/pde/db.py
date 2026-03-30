@@ -3,6 +3,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy import inspect, text
 from sqlmodel import Field, SQLModel, create_engine, Session
 
 # Store DB in ~/.pde/ so data is decoupled from the project directory
@@ -22,6 +23,7 @@ class Task(SQLModel, table=True):
     estimated_minutes: Optional[int] = None
     due_date: Optional[date] = None
     status: str = Field(default="open")  # open, done, deferred
+    cal_uid: Optional[str] = None  # set after syncing to Apple Calendar
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=None))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=None))
 
@@ -60,14 +62,27 @@ class Annotation(SQLModel, table=True):
     end_date: date
     label: str
     description: Optional[str] = None
+    cal_uid: Optional[str] = None  # set after syncing to Apple Calendar
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=None))
 
 
 engine = create_engine(DATABASE_URL)
 
 
+def _migrate_add_cal_uid():
+    """Add cal_uid column to tasks and annotations if not present. Safe to call on every startup."""
+    with engine.connect() as conn:
+        inspector = inspect(engine)
+        for table_name in ("tasks", "annotations"):
+            columns = [c["name"] for c in inspector.get_columns(table_name)]
+            if "cal_uid" not in columns:
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN cal_uid VARCHAR"))
+        conn.commit()
+
+
 def init_db():
     SQLModel.metadata.create_all(engine)
+    _migrate_add_cal_uid()
 
 
 def get_session():

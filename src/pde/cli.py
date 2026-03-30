@@ -1,14 +1,15 @@
 import json
+import os
 from datetime import date, timedelta
-from pathlib import Path
 from typing import Optional
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 import typer
 
-# Load .env from project root (walk up from this file)
-_env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-load_dotenv(_env_path, override=True)
+# Load .env by searching upward from cwd (works on all platforms and install methods)
+_env_file = find_dotenv(usecwd=True)
+if _env_file:
+    load_dotenv(_env_file, override=True)
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -26,6 +27,10 @@ from pde.services import (
     add_annotation,
     list_annotations,
     delete_annotation,
+    get_unsynced_annotations,
+    get_unsynced_tasks_with_due_date,
+    mark_annotation_synced,
+    mark_task_synced,
 )
 from pde.agent import run_planning_agent, run_quick_agent
 
@@ -35,6 +40,15 @@ console = Console()
 
 def _ensure_db():
     init_db()
+
+
+def _require_api_key():
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        console.print("[red]Error:[/red] ANTHROPIC_API_KEY is not set.")
+        console.print(
+            "Set it as an environment variable or add it to a .env file in your project directory."
+        )
+        raise typer.Exit(1)
 
 
 # ── Task commands ──────────────────────────────────────────
@@ -204,6 +218,7 @@ def quick(
         pde quick "team offsite next Tue-Thu, prep slides by Monday"
     """
     _ensure_db()
+    _require_api_key()
 
     console.print(f"[dim]Parsing:[/dim] {text}\n")
 
@@ -252,6 +267,8 @@ def plan(
         else:
             # Thu-Sun: plan next week
             week_start = today + timedelta(days=(7 - weekday))
+
+    _require_api_key()
 
     console.print(f"[bold]Planning week of {week_start}...[/bold]\n")
 
@@ -355,6 +372,104 @@ def feedback(
     except ValueError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
+
+
+# ── Calendar commands ──────────────────────────────────────
+
+calendar_app = typer.Typer(help="Sync PDE data to Apple Calendar (macOS only)")
+app.add_typer(calendar_app, name="calendar")
+
+
+@calendar_app.command("sync")
+def calendar_sync(
+    calendar_name: str = typer.Option("PDE", "--calendar", "-c", help="Apple Calendar name to sync into"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview what would be synced without making changes"),
+):
+    """Push annotations and task deadlines to Apple Calendar.
+
+    Creates a dedicated 'PDE' calendar (or whichever name you specify) and adds:
+    - Annotations as all-day events
+    - Tasks with due dates as 'DUE: <title>' all-day events
+
+    Safe to run multiple times — already-synced items are skipped.
+
+    macOS will prompt for Calendar access on the first run.
+    """
+    import sys
+    if sys.platform != "darwin":
+        console.print("[red]Calendar sync is macOS only.[/red]")
+        raise typer.Exit(1)
+
+    from datetime import timedelta
+    from pde.calendar_sync import make_uid, ensure_calendar_exists, create_all_day_event, CalendarSyncError
+
+    _ensure_db()
+
+    unsynced_annotations = get_unsynced_annotations()
+    unsynced_tasks = get_unsynced_tasks_with_due_date()
+
+    total = len(unsynced_annotations) + len(unsynced_tasks)
+    if total == 0:
+        console.print("[dim]Nothing new to sync. All items are up to date.[/dim]")
+        return
+
+    if dry_run:
+        console.print(f"[bold][DRY RUN] Would sync {total} item(s) to calendar '{calendar_name}':[/bold]\n")
+        for a in unsynced_annotations:
+            console.print(f"  [blue]Event:[/blue] {a.label}  ({a.start_date} → {a.end_date})")
+        for t in unsynced_tasks:
+            console.print(f"  [yellow]Deadline:[/yellow] DUE: {t.title}  ({t.due_date})")
+        return
+
+    # Ensure the calendar exists before starting (triggers permission prompt if needed)
+    try:
+        ensure_calendar_exists(calendar_name)
+    except CalendarSyncError as e:
+        console.print(f"[red]Could not access Calendar.app:[/red] {e}")
+        console.print("[dim]Make sure Calendar is installed and macOS has granted access.[/dim]")
+        raise typer.Exit(1)
+
+    created = 0
+    failed = 0
+
+    for a in unsynced_annotations:
+        uid = make_uid("annotation", a.id)
+        try:
+            create_all_day_event(
+                uid=uid,
+                title=a.label,
+                start_date=a.start_date,
+                end_date=a.end_date + timedelta(days=1),  # Calendar uses exclusive end dates
+                notes=a.description,
+                calendar_name=calendar_name,
+            )
+            mark_annotation_synced(a.id, uid)
+            console.print(f"  [green]Synced event:[/green] {a.label} ({a.start_date} → {a.end_date})")
+            created += 1
+        except CalendarSyncError as e:
+            console.print(f"  [red]Failed:[/red] annotation #{a.id} ({a.label}) — {e}")
+            failed += 1
+
+    for t in unsynced_tasks:
+        uid = make_uid("task", t.id)
+        title = f"DUE: {t.title}"
+        try:
+            create_all_day_event(
+                uid=uid,
+                title=title,
+                start_date=t.due_date,
+                end_date=t.due_date + timedelta(days=1),
+                notes=t.description,
+                calendar_name=calendar_name,
+            )
+            mark_task_synced(t.id, uid)
+            console.print(f"  [green]Synced deadline:[/green] {title} ({t.due_date})")
+            created += 1
+        except CalendarSyncError as e:
+            console.print(f"  [red]Failed:[/red] task #{t.id} ({t.title}) — {e}")
+            failed += 1
+
+    console.print(f"\n[bold]Done.[/bold] {created} synced" + (f", {failed} failed" if failed else "") + f" → calendar '{calendar_name}'")
 
 
 # ── History command ────────────────────────────────────────

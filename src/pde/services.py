@@ -207,6 +207,49 @@ def delete_annotation(annotation_id: int) -> None:
 # ── Feedback ───────────────────────────────────────────────
 
 
+# ── Calendar sync helpers ──────────────────────────────────
+
+
+def get_unsynced_annotations() -> list[Annotation]:
+    """Return annotations that have not yet been synced to Apple Calendar."""
+    with get_session() as session:
+        stmt = select(Annotation).where(Annotation.cal_uid == None).order_by(Annotation.start_date)
+        return list(session.exec(stmt).all())
+
+
+def get_unsynced_tasks_with_due_date() -> list[Task]:
+    """Return open tasks with a due_date that have not yet been synced to Apple Calendar."""
+    with get_session() as session:
+        stmt = (
+            select(Task)
+            .where(Task.status == "open")
+            .where(Task.due_date != None)
+            .where(Task.cal_uid == None)
+            .order_by(Task.due_date)
+        )
+        return list(session.exec(stmt).all())
+
+
+def mark_annotation_synced(annotation_id: int, cal_uid: str) -> None:
+    with get_session() as session:
+        annotation = session.get(Annotation, annotation_id)
+        if not annotation:
+            raise ValueError(f"Annotation {annotation_id} not found")
+        annotation.cal_uid = cal_uid
+        session.add(annotation)
+        session.commit()
+
+
+def mark_task_synced(task_id: int, cal_uid: str) -> None:
+    with get_session() as session:
+        task = session.get(Task, task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+        task.cal_uid = cal_uid
+        session.add(task)
+        session.commit()
+
+
 def log_feedback(
     plan_id: int,
     adherence: int,
